@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "courseId": 2073,
+  "repository": "LearningOS/2026a-rcore-fzx687",
+  "user": "fzx687",
+  "totalScore": 500,
+  "chapters": {
+    "ch3": {
+      "points": "7/7",
+      "score": 100,
+      "commit": "b405a27e1a356f0c54348e99ca4dd3d3ea40a5db"
+    }
+  },
+  "score": 100,
+  "upload": {
+    "status": "pending",
+    "runId": "42628833731",
+    "runAttempt": "1"
+  }
+}
