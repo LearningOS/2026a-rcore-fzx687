@@ -63,6 +63,48 @@ impl MemorySet {
             None,
         );
     }
+    /// insert framed area with confict judge
+    pub fn insert_framed_area_with_confict_judge(
+        &mut self,
+        start_va: VirtAddr,
+        end_va: VirtAddr,
+        permission: MapPermission,
+    ) -> isize{
+        let start_vpn: VirtPageNum = start_va.floor();
+        let end_vpn: VirtPageNum = end_va.ceil();
+        for area in &self.areas {
+            let start = area.vpn_range.get_start();
+            let end = area.vpn_range.get_end();
+            if start < end_vpn && start_vpn < end {
+                return -1;
+            }
+        }
+        let mut map_area = MapArea::new(start_va, end_va, MapType::Framed, permission);
+        if map_area.map(&mut self.page_table) == -1 {
+            return -1;
+        }
+        self.areas.push(map_area);
+        0
+    }
+    /// deallocate memory
+    pub fn deallocate_memory(&mut self, _start: VirtAddr, _end: VirtAddr) -> isize {
+        let mut start = _start.floor();
+        let end = _end.ceil();
+        while start < end {
+            match self.areas.iter().position(|area| area.vpn_range.get_start() == start) {
+                Some(i) => {
+                    if self.areas[i].vpn_range.get_end() > end { 
+                        return -1; 
+                    }
+                    let mut area = self.areas.remove(i);
+                    start = area.vpn_range.get_end();
+                    area.unmap(&mut self.page_table);
+                }
+                None => return -1,
+            }
+        }
+        0
+    }
     fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
         map_area.map(&mut self.page_table);
         if let Some(data) = data {
@@ -287,20 +329,24 @@ impl MapArea {
             map_perm,
         }
     }
-    pub fn map_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
+    pub fn map_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) -> isize {
         let ppn: PhysPageNum;
         match self.map_type {
             MapType::Identical => {
                 ppn = PhysPageNum(vpn.0);
             }
             MapType::Framed => {
-                let frame = frame_alloc().unwrap();
-                ppn = frame.ppn;
-                self.data_frames.insert(vpn, frame);
+                if let Some(frame) = frame_alloc(){
+                    ppn = frame.ppn;
+                    self.data_frames.insert(vpn, frame);
+                }else {
+                    return -1;
+                }
             }
         }
         let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
         page_table.map(vpn, ppn, pte_flags);
+        0
     }
     #[allow(unused)]
     pub fn unmap_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
@@ -309,10 +355,13 @@ impl MapArea {
         }
         page_table.unmap(vpn);
     }
-    pub fn map(&mut self, page_table: &mut PageTable) {
+    pub fn map(&mut self, page_table: &mut PageTable) -> isize{
         for vpn in self.vpn_range {
-            self.map_one(page_table, vpn);
+            if self.map_one(page_table, vpn) == -1 {
+                return -1;
+            }
         }
+        0
     }
     #[allow(unused)]
     pub fn unmap(&mut self, page_table: &mut PageTable) {
@@ -328,9 +377,16 @@ impl MapArea {
         self.vpn_range = VPNRange::new(self.vpn_range.get_start(), new_end);
     }
     #[allow(unused)]
+    pub fn shrink_to_new_start(&mut self, page_table: &mut PageTable, new_start: VirtPageNum) {
+        for vpn in VPNRange::new(self.vpn_range.get_start(),new_start) {
+            self.unmap_one(page_table, vpn)
+        }
+        self.vpn_range = VPNRange::new(new_start,self.vpn_range.get_end());
+    }
+    #[allow(unused)]
     pub fn append_to(&mut self, page_table: &mut PageTable, new_end: VirtPageNum) {
         for vpn in VPNRange::new(self.vpn_range.get_end(), new_end) {
-            self.map_one(page_table, vpn)
+            self.map_one(page_table, vpn);
         }
         self.vpn_range = VPNRange::new(self.vpn_range.get_start(), new_end);
     }

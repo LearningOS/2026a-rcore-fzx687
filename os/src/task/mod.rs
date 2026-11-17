@@ -17,11 +17,12 @@ mod task;
 use crate::loader::{get_app_data, get_num_app};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
+use crate::config::MAX_SYSCALL_NUM;
 use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
-
+use crate::mm::{MapPermission, VirtAddr};
 pub use context::TaskContext;
 
 /// The task manager, where all the tasks are managed.
@@ -153,6 +154,46 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    /// add the times of syscall with the id
+    pub fn add_syscall_time(&self, syscall_id: usize) {
+        if syscall_id < MAX_SYSCALL_NUM {
+            let mut inner = self.inner.exclusive_access();
+            let current = inner.current_task;
+            inner.tasks[current].syscall_time[syscall_id] += 1;
+        }
+    }
+
+    /// get the times of syscall with the id
+    pub fn get_syscall_time(&self, syscall_id: usize) -> isize{
+        if syscall_id < MAX_SYSCALL_NUM {
+            let inner = self.inner.exclusive_access();
+            let current = inner.current_task;
+            inner.tasks[current].syscall_time[syscall_id]
+        }else {
+            -1
+        }
+    }
+
+    /// mmap : allocate some memory
+    pub fn allocate_memory(&self, _start: usize, _len: usize, _prot: usize) -> isize{
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let current_task = &mut inner.tasks[current];
+        current_task.memory_set.insert_framed_area_with_confict_judge(
+            VirtAddr::from(_start),
+             VirtAddr::from(_start + _len), 
+            MapPermission::from_bits(((_prot << 1) as u8) | MapPermission::U.bits()).unwrap())
+    }
+
+    /// mnumap : deallocate some memory
+    pub fn deallocate_memory(&self , _start: usize, _len: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let current_task = &mut inner.tasks[current];
+        current_task.memory_set.deallocate_memory(VirtAddr::from(_start),
+             VirtAddr::from(_start + _len))
+    }
 }
 
 /// Run the first task in task list.
@@ -201,4 +242,24 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// add the times of syscall with the id
+pub fn add_syscall_time(syscall_id: usize) {
+    TASK_MANAGER.add_syscall_time(syscall_id);
+}
+
+/// get the times of syscall with the id
+pub fn get_syscall_time(syscall_id: usize) -> isize{
+    TASK_MANAGER.get_syscall_time(syscall_id)
+}
+
+/// allocate memory
+pub fn allocate_certain_memory(_start: usize, _len: usize, _prot: usize) -> isize{
+    TASK_MANAGER.allocate_memory(_start, _len, _prot)
+}
+
+/// deallocate memory
+pub fn deallocate_certain_memory(_start: usize, _len: usize) -> isize {
+    TASK_MANAGER.deallocate_memory(_start, _len)
 }
