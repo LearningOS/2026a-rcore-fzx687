@@ -59,9 +59,6 @@ pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
     trace!("kernel: sys_trace");
     match _trace_request {
         0 => {
-            if _id > (1 << 38) {
-                return -1;
-            }
             let mut num: isize = -1;
             if let Some(buffers) = translated_byte_buffer(current_user_token(), _id as *const u8, 1) {
                 for buffer in buffers {
@@ -73,9 +70,6 @@ pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
             }
         }
         1 => {
-            if _id > (1 << 38) {
-                return -1;
-            }
             if let Some(mut buffers) = translated_byte_buffer(current_user_token(), _id as *const u8, 1) {
                 let pte = PageTable::from_token(current_user_token())
                     .translate(VirtAddr::from(_id).floor());
