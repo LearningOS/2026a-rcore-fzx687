@@ -2,12 +2,11 @@
 use alloc::sync::Arc;
 
 use crate::{
-    loader::get_app_data_by_name,
-    mm::{translated_refmut, translated_str},
+    config::PAGE_SIZE, loader::get_app_data_by_name, mm::{translated_byte_buffer, translated_refmut, translated_str, MapPermission, VirtAddr}, 
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next,
-    },
+        suspend_current_and_run_next, TaskControlBlock,
+    }, timer::get_time_us
 };
 
 #[repr(C)]
@@ -106,29 +105,51 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
 pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    trace!("kernel:pid[{}] sys_get_time", current_task().unwrap().pid.0);
+    let buffers = translated_byte_buffer(current_user_token(), _ts as *mut u8, 16);
+    let us = get_time_us();
+    let tv: TimeVal = TimeVal { sec: us / 1000000, usec: us % 1000000 };
+    let src = unsafe {
+            core::slice::from_raw_parts(&tv as *const TimeVal as *const u8, 16)
+    };
+    let mut offset = 0;
+    for buffer in buffers {
+        let n = buffer.len().min(16 - offset);
+        buffer[..n].copy_from_slice(&src[offset..offset + n]);
+        offset += n;
+    }
+    0
 }
 
 /// YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    trace!("kernel:pid[{}] sys_mmap", current_task().unwrap().pid.0);
+    if _start % PAGE_SIZE != 0 || _port & !0x7 != 0 || _port & 0x7 == 0 {
+        -1
+    }else {
+        let task = current_task().unwrap();
+        let mut inner = task.inner_exclusive_access();
+        let start_va = VirtAddr::from(_start);
+        let end_va = VirtAddr::from(_start + _len);
+        let port = MapPermission::from_bits(((_port << 1) | (1 << 4) ) as u8).unwrap();
+        if inner.memory_set.judge_conflict(start_va, end_va){
+            return -1;
+        }
+        inner.memory_set.insert_framed_area(start_va, end_va, port);
+        0        
+    }
 }
 
 /// YOUR JOB: Implement munmap.
 pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    trace!("kernel:pid[{}] sys_munmap", current_task().unwrap().pid.0);
+    if _start % PAGE_SIZE != 0 {
+        -1
+    }else {
+        let task = current_task().unwrap();
+        let mut inner = task.inner_exclusive_access();
+        inner.memory_set.remove_areas_with_start_and_end_vpn(VirtAddr::from(_start).floor(), VirtAddr::from(_start + _len).ceil())
+    }
 }
 
 /// change data segment size
@@ -144,18 +165,24 @@ pub fn sys_sbrk(size: i32) -> isize {
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
 pub fn sys_spawn(_path: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    trace!("kernel:pid[{}] sys_spawn", current_task().unwrap().pid.0);
+    let token = current_user_token();
+    let path = translated_str(token, _path);
+    if let Some(data) = get_app_data_by_name(path.as_str()) {
+        TaskControlBlock::new(data).pid.0 as isize
+    } else {
+        -1
+    }
 }
 
 // YOUR JOB: Set task priority.
 pub fn sys_set_priority(_prio: isize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+    trace!("kernel:pid[{}] sys_set_priority", current_task().unwrap().pid.0);
+    if _prio < 2 {
+        return -1;
+    }
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    inner.prioity = _prio as usize;
+    0
 }

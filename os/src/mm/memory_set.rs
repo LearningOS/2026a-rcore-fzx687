@@ -60,6 +60,14 @@ impl MemorySet {
             None,
         );
     }
+    /// judge if there is memory mapped in virtual address
+    pub fn judge_conflict(&self, start_va: VirtAddr, end_va: VirtAddr) -> bool{
+        if let Some(_) = self.areas.iter().find(|area| area.vpn_range.get_start() < end_va.ceil() && start_va.floor() < area.vpn_range.get_end()){
+            true
+        }else {
+            false
+        }
+    }
     /// remove a area
     pub fn remove_area_with_start_vpn(&mut self, start_vpn: VirtPageNum) {
         if let Some((idx, area)) = self
@@ -71,6 +79,25 @@ impl MemorySet {
             area.unmap(&mut self.page_table);
             self.areas.remove(idx);
         }
+    }
+    /// remove areas 
+    pub fn remove_areas_with_start_and_end_vpn(&mut self, start_vpn: VirtPageNum, end_vpn: VirtPageNum) -> isize{
+        let mut start = start_vpn;
+        while start < end_vpn {
+            if let Some((idx, area)) = self
+                .areas
+                .iter_mut()
+                .enumerate()
+                .find(|(_, area)| area.vpn_range.get_start() == start)
+            {
+                start = area.vpn_range.get_end();
+                area.unmap(&mut self.page_table);
+                self.areas.remove(idx);
+            }else {
+                return -1;
+            }
+        }
+        0
     }
     /// Add a new MapArea into this MemorySet.
     /// Assuming that there are no conflicts in the virtual address
