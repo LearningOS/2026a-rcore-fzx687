@@ -5,7 +5,7 @@ use crate::{
     config::PAGE_SIZE, loader::get_app_data_by_name, mm::{translated_byte_buffer, translated_refmut, translated_str, MapPermission, VirtAddr}, 
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, TaskControlBlock,
+        suspend_current_and_run_next, 
     }, timer::get_time_us
 };
 
@@ -169,7 +169,11 @@ pub fn sys_spawn(_path: *const u8) -> isize {
     let token = current_user_token();
     let path = translated_str(token, _path);
     if let Some(data) = get_app_data_by_name(path.as_str()) {
-        TaskControlBlock::new(data).pid.0 as isize
+        let task = current_task().unwrap();
+        let new_task = task.spawn(data);
+        let pid = new_task.pid.0;
+        add_task(new_task);
+        pid as isize
     } else {
         -1
     }
@@ -184,5 +188,5 @@ pub fn sys_set_priority(_prio: isize) -> isize {
     let task = current_task().unwrap();
     let mut inner = task.inner_exclusive_access();
     inner.prioity = _prio as usize;
-    0
+    _prio
 }
